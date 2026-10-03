@@ -69,3 +69,15 @@ npm run build
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
 - 想回到初始数据：清掉浏览器里 `hydrology-monitor-station:entries` 这一项，或调用 `resetModule(模块)`。
+
+## 通讯系统共用规则
+
+- 窄带/蜂窝的信号弱边界、告警关闭、归档结果三处判断收拢在
+  `frontend/src/data/comm-rules.ts`（`judgeCommDevice`），通讯系统页、帧上报、站房巡检待办
+  都复用它；每次判定的结论与依据留痕在 `frontend/src/data/comm-history.ts`。
+- 存量设备首次加载时按最近通讯时刻回填协议版本（`frontend/src/data/comm-migration.ts`，
+  2026-01-01 前为旧协议 V1、之后为 V2），只补协议版本字段，设备仍归原站点，重复执行安全。
+- 帧上报在 `frontend/src/api/comm-ingest.ts`：同一帧（frameId）重复上报只更新一次；
+  某类协议解析失败只隔离该帧、不影响其他设备，失败帧留档后可「从失败设备继续处理」。
+- 站房维护页的「通讯巡检待办」直接复用共用判定：告警未关闭且未归档的设备才进待办，
+  旧协议设备恢复（告警关闭）后自动归档、不再当活动项。

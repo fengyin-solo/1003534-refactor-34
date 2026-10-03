@@ -33,11 +33,20 @@
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
     </form>
 
+    <div class="ingest-panel">
+      <button class="btn" type="button" @click="simulateIngest">模拟接收一批上报帧</button>
+      <button class="btn ghost" type="button" :disabled="!failedCount" @click="resumeIngest">
+        从失败设备继续处理（{{ failedCount }}）
+      </button>
+      <span class="ingest-message">{{ ingestMessage }}</span>
+    </div>
+
     <table class="data-table">
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
           <th>当前状态</th>
+          <th>巡检判定</th>
           <th>可执行动作</th>
         </tr>
       </thead>
@@ -45,6 +54,16 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td>{{ row.status }}</td>
+          <td>
+            <button
+              class="link"
+              type="button"
+              :title="judgmentOf(row).basis.join('\n')"
+              @click="toggleHistory(row)"
+            >
+              {{ judgmentOf(row).active ? '活动' : '已归档' }}（历史{{ historyCount(row) }}条）
+            </button>
+          </td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -58,10 +77,22 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无通讯系统数据，可先登记通讯设备</td>
+          <td :colspan="columns.length + 3" class="empty-state">暂无通讯系统数据，可先登记通讯设备</td>
         </tr>
       </tbody>
     </table>
+
+    <section v-if="selectedDevice" class="history-panel">
+      <h3>{{ selectedDevice }} 的判定历史</h3>
+      <p v-if="!selectedHistory.length" class="empty-state">暂无判定历史</p>
+      <ul v-else>
+        <li v-for="(record, index) in selectedHistory" :key="index">
+          <strong>{{ record.时刻 }}</strong>｜{{ record.结论 }}
+          <br />
+          <small>依据：{{ record.依据.join('；') }}</small>
+        </li>
+      </ul>
+    </section>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条通讯系统记录</span>
@@ -74,15 +105,22 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  commHistoryOf,
   downloadEntries,
+  failedCommFrames,
+  ingestCommFrames,
+  judgeCommDevice,
   listEntries,
   moduleMeta,
+  resumeCommIngest,
   runAction as applyAction,
+  sampleCommFrames,
 } from '@/api/local-service'
+import type { CommJudgment, JudgmentRecord } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('communication')
-const columns = ["设备编号", "设备类型", "所属站点", "通讯协议", "信号强度", "最近通讯时刻", "维护人员", "设备状态"]
+const columns = ["设备编号", "设备类型", "所属站点", "通讯协议", "协议版本", "信号强度", "最近通讯时刻", "维护人员", "设备状态"]
 const actions = ["登记故障", "确认恢复", "申请更换"]
 const statuses = ["通讯正常", "信号弱", "通讯中断", "待更换"]
 const stats = [{"label": "设备总数", "value": 0}, {"label": "通讯正常数", "value": 0}, {"label": "中断设备数", "value": 0}]
@@ -90,7 +128,11 @@ const stats = [{"label": "设备总数", "value": 0}, {"label": "通讯正常数
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const ingestMessage = ref('')
+const failedCount = ref(0)
 const filters = ref<Record<string, string>>({})
+const selectedDevice = ref('')
+const histories = ref<Record<string, JudgmentRecord[]>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
@@ -98,6 +140,60 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const judgments = computed(() =>
+  new Map<number, CommJudgment>(rows.value.map((row) => [Number(row.id), judgeCommDevice(row)])),
+)
+const selectedHistory = computed(() => histories.value[selectedDevice.value] ?? [])
+
+function judgmentOf(row: EntryRow): CommJudgment {
+  return judgments.value.get(Number(row.id)) ?? judgeCommDevice(row)
+}
+
+function historyCount(row: EntryRow): number {
+  return (histories.value[String(row['设备编号'])] ?? []).length
+}
+
+function toggleHistory(row: EntryRow) {
+  const deviceNo = String(row['设备编号'])
+  selectedDevice.value = selectedDevice.value === deviceNo ? '' : deviceNo
+}
+
+function refreshHistories() {
+  const next: Record<string, JudgmentRecord[]> = {}
+  for (const row of rows.value) {
+    next[String(row['设备编号'])] = commHistoryOf(String(row['设备编号']))
+  }
+  histories.value = next
+}
+
+function refreshFailed() {
+  failedCount.value = failedCommFrames().length
+}
+
+function describeReport(label: string, report: { applied: number; duplicated: number; failed: { reason: string }[] }) {
+  const parts = [`${label}：应用${report.applied}帧`, `重复${report.duplicated}帧已忽略`]
+  if (report.failed.length) {
+    parts.push(`失败${report.failed.length}帧已隔离（${report.failed[0].reason}），不影响其他设备`)
+  }
+  ingestMessage.value = parts.join('，')
+}
+
+function simulateIngest() {
+  errorMessage.value = ''
+  describeReport('接收完成', ingestCommFrames(sampleCommFrames()))
+  reload()
+}
+
+function resumeIngest() {
+  errorMessage.value = ''
+  const report = resumeCommIngest()
+  if (!report.applied && !report.failed.length) {
+    ingestMessage.value = '没有待续传的失败帧'
+    return
+  }
+  describeReport('续传完成', report)
+  reload()
+}
 
 function resetFilters() {
   filters.value = {}
@@ -128,6 +224,8 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    refreshHistories()
+    refreshFailed()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '通讯系统列表读取失败'
   }

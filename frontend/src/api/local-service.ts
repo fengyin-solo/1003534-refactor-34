@@ -1,6 +1,41 @@
+import { appendCommHistory, commHistoryOf, nowText } from '@/data/comm-history'
+import { judgeCommDevice } from '@/data/comm-rules'
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
+
+// 通讯系统的共用判定、帧上报与判定历史，页面统一从这里拿，不直接碰 data 层。
+export { commHistoryOf, judgeCommDevice }
+export type { CommJudgment } from '@/data/comm-rules'
+export type { JudgmentRecord } from '@/data/comm-history'
+export { failedCommFrames, ingestCommFrames, resumeCommIngest, sampleCommFrames } from './comm-ingest'
+export type { CommFrame, FailedFrame, IngestReport } from './comm-ingest'
+
+// 站房巡检待办：直接复用通讯设备的共用判定，告警未关闭且未归档的设备才进待办。
+export type CommInspectionTodo = {
+  设备编号: string
+  所属站点: string
+  通讯协议: string
+  协议版本: string
+  信号强度: string
+  现状: string
+  依据: string[]
+}
+
+export function commInspectionTodos(): CommInspectionTodo[] {
+  return listRows('communication')
+    .map((row) => ({ row, judgment: judgeCommDevice(row) }))
+    .filter(({ judgment }) => judgment.active)
+    .map(({ row, judgment }) => ({
+      设备编号: String(row['设备编号'] ?? ''),
+      所属站点: String(row['所属站点'] ?? ''),
+      通讯协议: String(row['通讯协议'] ?? ''),
+      协议版本: String(row['协议版本'] ?? ''),
+      信号强度: row['信号强度'] === '' ? '缺失' : `${String(row['信号强度'])}dBm`,
+      现状: String(row.status),
+      依据: judgment.basis,
+    }))
+}
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
@@ -53,6 +88,14 @@ export function runAction(key: string, id: number, action: string): ActionResult
   const next = [...rows]
   next[index] = updated
   saveRows(key, next)
+  if (key === 'communication') {
+    // 人工流转同样走共用判定留痕，历史依据不断档。
+    appendCommHistory(String(updated['设备编号']), {
+      时刻: nowText(),
+      结论: `人工${action}：状态→「${target}」`,
+      依据: judgeCommDevice(updated).basis,
+    })
+  }
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 

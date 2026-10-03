@@ -63,6 +63,19 @@
       </tbody>
     </table>
 
+    <section class="todo-panel">
+      <h3>通讯巡检待办（复用通讯系统协议判定）</h3>
+      <p v-if="!commTodos.length" class="empty-state">暂无通讯巡检待办</p>
+      <ul v-else>
+        <li v-for="todo in commTodos" :key="todo.设备编号">
+          <strong>{{ todo.设备编号 }}</strong>
+          · {{ todo.所属站点 }} · {{ todo.通讯协议 }}{{ todo.协议版本 }} · 信号{{ todo.信号强度 }} · {{ todo.现状 }}
+          <br />
+          <small>依据：{{ todo.依据.join('；') }}</small>
+        </li>
+      </ul>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条站房维护记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -74,11 +87,13 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  commInspectionTodos,
   downloadEntries,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import type { CommInspectionTodo } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('stationhouse')
@@ -90,6 +105,7 @@ const stats = [{"label": "待维护项数", "value": 0}, {"label": "施工中项
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const commTodos = ref<CommInspectionTodo[]>([])
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
@@ -128,6 +144,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    commTodos.value = commInspectionTodos()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '站房维护列表读取失败'
   }
