@@ -67,6 +67,8 @@
       <span>共 {{ total }} 条巡检记录记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <InspectionTodoPanel />
   </section>
 </template>
 
@@ -80,6 +82,7 @@ import {
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import InspectionTodoPanel from '@/components/InspectionTodoPanel.vue'
 
 const meta = moduleMeta('inspection')
 const columns = ["记录编号", "站点编号", "巡检日期", "巡检人员", "检查项目", "发现问题", "处理措施", "巡检状态"]

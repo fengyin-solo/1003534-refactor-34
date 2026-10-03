@@ -67,6 +67,8 @@
       <span>共 {{ total }} 条站房维护记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <InspectionTodoPanel />
   </section>
 </template>
 
@@ -80,6 +82,7 @@ import {
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import InspectionTodoPanel from '@/components/InspectionTodoPanel.vue'
 
 const meta = moduleMeta('stationhouse')
 const columns = ["记录编号", "站点编号", "维护类型", "维护内容", "维护单位", "维护日期", "费用支出", "维护状态"]

@@ -13,7 +13,14 @@
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端（唯一运行单元）
 │   ├── src/views/            每个业务模块一个页面
+│   ├── src/components/       跨入口复用组件（如站房巡检待办面板）
 │   ├── src/api/local-service.ts   本地数据服务：列表、筛选、动作流转、导出
+│   ├── src/domain/           通讯协议共用规则（唯一事实来源，禁止各入口各写一套）
+│   │   ├── protocol-rules.ts      窄带/蜂窝信号弱边界、活动项（告警关闭+归档）、版本时间线
+│   │   ├── device-bootstrap.ts    存量设备协议版本回填、协议迁移（迁移后仍归原站点）
+│   │   ├── device-ledger.ts       设备历史台账（规则版本 + 判定依据，可复核）
+│   │   ├── frame-ingest.ts        通讯帧批量上报：同帧幂等、协议故障按设备隔离、可续处理
+│   │   └── inspection-todos.ts    站房巡检待办（复用协议判定）
 │   ├── src/data/             模块元数据 / 示例数据 / localStorage 持久化
 │   ├── src/stores/           会话与筛选状态
 │   └── vite.config.ts        dev server 配置（open: false，无 /api 代理）
@@ -68,4 +75,9 @@ npm run build
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
+- 通讯协议相关判断（信号弱边界、告警关闭/归档活动项、版本回填）统一收口在
+  `frontend/src/domain/protocol-rules.ts`：窄带按 RSSI、蜂窝按 RSRP，阈值在协议台账里
+  各算各的，但任何入口（通讯页、帧上报、站房/巡检待办）只能复用，不得再自定阈值。
+- 存量设备打开即按「最近通讯时刻」匹配协议时间线回填版本（只取启用时间不晚于该时刻的版本）；
+  协议迁移只改协议不改站点，回填、迁移、归档等动作都带规则版本与依据写入设备历史台账。
 - 想回到初始数据：清掉浏览器里 `hydrology-monitor-station:entries` 这一项，或调用 `resetModule(模块)`。
